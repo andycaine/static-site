@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: A simple static site stack.
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: static-site
+    Description: A simple static site stack.
+    Author: Andy Caine
+    SemanticVersion: 0.1.2
+    SpdxLicenseId: MIT
+    LicenseUrl: LICENSE
+    ReadmeUrl: README.md
+    Labels: ['cloudformation', 's3']
+    HomePageUrl: https://github.com/andycaine/static-site#readme
+    SourceCodeUrl: https://github.com/andycaine/static-site
+Parameters:
+  StaticAssetsLayerArn:
+    Type: String
+    Description: ARN of the layer containing the static assets to deploy.
+  ContentSecurityPolicy:
+    Type: String
+    Description: The content security policy
+    Default: "default-src 'none'; img-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; frame-ancestors 'none'"
+  CacheControl:
+    Type: String
+    Description: The cache control header
+    Default: "max-age=31536000, immutable"
+Resources:
+  StaticAssetsDeployment:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location:
+        ApplicationId: 'arn:aws:serverlessrepo:eu-west-2:211125310871:applications/static-assets-deployment'
+        SemanticVersion: 0.2.1
+      Parameters:
+        StaticAssetsBucket: !Ref SiteStaticAssetsBucket
+        StaticAssetsLayerArn: !Ref StaticAssetsLayerArn
+        CacheControl: !Ref CacheControl
+
+  SiteStaticAssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  SiteStaticAssetsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteStaticAssetsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowReadOAC
+            Effect: Allow
+            Principal:
+              CanonicalUser: !GetAtt CloudFrontOAI.S3CanonicalUserId
+            Action: s3:GetObject
+            Resource: !Sub "${SiteStaticAssetsBucket.Arn}/*"
+
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub 'OAI for ${AWS::StackName}'
+
+  RewriteDefaultIndexCloudFrontFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "rewrite-default-index-cf-function-${AWS::StackName}"
+      AutoPublish: true
+      FunctionCode: |
+        function handler(event) {
+          var request = event.request;
+          var uri = request.uri;
+
+          if (uri.endsWith("/")) {
+              request.uri += "index.html";
+          } else if (!uri.includes(".")) {
+              request.uri += "/index.html";
+          }
+          return request;
+        }
+      FunctionConfig:
+        Comment: "Redirect paths to load index.html from s3"
+        Runtime: cloudfront-js-1.0
+
+  ResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: WebSecurityHeadersPolicy
+        Comment: Common web security response headers
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !Ref ContentSecurityPolicy
+            Override: false
+          ContentTypeOptions: # sets to nosniff
+            Override: false
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: strict-origin-when-cross-origin
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 63072000
+            IncludeSubdomains: true
+            Preload: true
+            Override: false
+          XSSProtection:
+            ModeBlock: true
+            Protection: true
+            Override: true
+
+  CloudFrontDistro:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Origins:
+          - Id: SiteStaticAssets
+            DomainName: !GetAtt SiteStaticAssetsBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOAI}'
+        Enabled: true
+        HttpVersion: http2and3
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - HEAD
+            - GET
+            - OPTIONS
+          TargetOriginId: SiteStaticAssets
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # caching optimised
+          Compress: true
+          ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+          ViewerProtocolPolicy: redirect-to-https
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt RewriteDefaultIndexCloudFrontFunction.FunctionARN
+        PriceClass: PriceClass_100
+        Logging:
+          Bucket: !GetAtt AccessLogBucket.DomainName
+          IncludeCookies: false
+          Prefix: !Sub "AWSLogs/${AWS::AccountId}/cloudfront/"
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          #MinimumProtocolVersion: TLSv1.2_2021
+          #AcmCertificateArn: xxx
+          #SslSupportMethod: sni-only
+        #WebACLId: xxx
+        #Aliases
+        # - admin.example.com
+
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: LogDeliveryWrite
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: RetentionRule
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+
+
+Outputs:
+  URL:
+    Description: Site URL
+    Value: !Sub "https://${CloudFrontDistro.DomainName}"
