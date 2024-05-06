@@ -11,7 +11,7 @@ Metadata:
     Name: static-site
     Description: A simple static site stack.
     Author: Andy Caine
-    SemanticVersion: 0.4.4
+    SemanticVersion: 0.4.5
     SpdxLicenseId: MIT
     LicenseUrl: LICENSE
     ReadmeUrl: README.md
@@ -116,7 +116,7 @@ Resources:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
       ResponseHeadersPolicyConfig:
-        Name: WebSecurityHeadersPolicy
+        Name: !Sub "SWHP-${AWS::StackName}"
         Comment: Common web security response headers
         SecurityHeadersConfig:
           ContentSecurityPolicy:
