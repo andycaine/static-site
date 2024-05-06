@@ -20,7 +20,7 @@ Transform: 'AWS::Serverless-2016-10-31'
 Description: An example stack showing the use of static-site
 Resources:
 
-  StaticAssetsDeployment:
+  StaticSite:
     Type: AWS::Serverless::Application
     Properties:
       Location:
