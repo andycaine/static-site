@@ -11,7 +11,7 @@ Metadata:
     Name: static-site
     Description: A simple static site stack.
     Author: Andy Caine
-    SemanticVersion: 0.4.5
+    SemanticVersion: 0.4.7
     SpdxLicenseId: MIT
     LicenseUrl: LICENSE
     ReadmeUrl: README.md
@@ -53,7 +53,7 @@ Resources:
     Properties:
       Location:
         ApplicationId: 'arn:aws:serverlessrepo:eu-west-2:211125310871:applications/static-assets-deployment'
-        SemanticVersion: 0.3.3
+        SemanticVersion: 0.3.5
       Parameters:
         StaticAssetsBucket: !Ref SiteStaticAssetsBucket
         StaticAssetsLayerArn: !Ref StaticAssetsLayerArn
